@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 09:05:18
-// @ LastEditTime : 2026-05-24 11:24:31
+// @ LastEditTime : 2026-05-25 13:45:15
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -26,10 +26,13 @@ type GGML_INIT func(Model) error
 
 type GGML struct {
 	org                 ggml
-	Model               string // 模型绝对路径
-	KV, Tensors         int64  // KV 张量数
+	KV, Tensors         int64 // KV 张量数
 	Alignment, MetaSize uint64
 	DataOffset          uint64 // 张量偏移
+}
+
+type Context struct {
+	org ggml
 }
 
 type Backend struct {
@@ -38,4 +41,22 @@ type Backend struct {
 	KV, Tensors         int64  // KV 张量数
 	Alignment, MetaSize uint64
 	DataOffset          uint64 // 张量偏移
+}
+
+func (ptr *GGML) Close() error {
+	err := ptr.org.close()
+	if err == nil {
+		ptr.org._fctx = nil
+		ptr.org._gctx = nil
+	}
+	return err
+}
+
+func (ptr *Context) Close() error {
+	err := ptr.org.close()
+	if err == nil {
+		ptr.org._fctx = nil
+		ptr.org._gctx = nil
+	}
+	return err
 }
