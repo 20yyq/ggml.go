@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-25 14:30:51
-// @ LastEditTime : 2026-05-25 20:29:59
+// @ LastEditTime : 2026-05-26 14:51:53
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -306,4 +306,19 @@ const (
 	GGML_TRI_TYPE_UPPER
 	GGML_TRI_TYPE_LOWER_DIAG
 	GGML_TRI_TYPE_LOWER
+)
+
+type GGML_BACKEND_DEV_TYPE uint32
+
+const (
+	// CPU device using system memory
+	GGML_BACKEND_DEVICE_TYPE_CPU GGML_BACKEND_DEV_TYPE = iota
+	// GPU device using dedicated memory
+	GGML_BACKEND_DEVICE_TYPE_GPU
+	// integrated GPU device using host memory
+	GGML_BACKEND_DEVICE_TYPE_IGPU
+	// accelerator devices intended to be used together with the CPU backend (e.g. BLAS or AMX)
+	GGML_BACKEND_DEVICE_TYPE_ACCEL
+	// "meta" device wrapping multiple other devices for tensor parallelism
+	GGML_BACKEND_DEVICE_TYPE_META
 )

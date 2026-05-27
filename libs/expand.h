@@ -1,7 +1,7 @@
 /*
  * @Author       : Eacher
  * @Date         : 2026-05-25 13:58:12
- * @LastEditTime : 2026-05-25 14:26:16
+ * @LastEditTime : 2026-05-27 09:50:37
  * @LastEditors  : Eacher
  * --------------------------------------------------------------------------------<
  * @Description  : Please edit a descrition about this file at here.
@@ -16,3 +16,7 @@
 #include "gguf.h"
 
 void numa_init_fn(ggml_backend_reg_t, enum ggml_numa_strategy);
+
+extern void go_log_callback(enum ggml_log_level level, char * text, void * user_data);
+extern void go_abort_callback(char * text);
+
