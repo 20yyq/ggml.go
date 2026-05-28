@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 09:42:34
-// @ LastEditTime : 2026-05-25 17:30:32
+// @ LastEditTime : 2026-05-28 11:32:52
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -18,6 +18,8 @@ import (
 	ggmlgo "ggml.go"
 )
 
+const SIZE_MAX uint64 = 0xFFFFFFFFFFFFFFFF
+
 var is_init bool
 
 func numa_init() {
@@ -30,6 +32,11 @@ func numa_init() {
 		panic("CPU backend is not loaded")
 	}
 	C.numa_init_fn(reg, C.GGML_NUMA_STRATEGY_NUMACTL)
+}
+
+func ggml_padding(u1, u2 uint64) uint64 {
+	u2 -= 1
+	return (u1 + u2) & (SIZE_MAX ^ u2)
 }
 
 type InitParams struct {

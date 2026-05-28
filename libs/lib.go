@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-22 08:21:47
-// @ LastEditTime : 2026-05-27 14:08:21
+// @ LastEditTime : 2026-05-28 16:28:35
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -20,6 +20,8 @@ import (
 
 	ggmlgo "ggml.go"
 )
+
+const GGML_MAX_DIMS = 4
 
 //export go_log_callback
 func go_log_callback(level C.enum_ggml_log_level, text *C.char, _ unsafe.Pointer) {
@@ -108,22 +110,34 @@ func (org *ggml) close() error {
 	return err
 }
 
-func (org *ggml) ggml_new_tensor(t ggmlgo.GGML_TYPE, b []int64) (Tensor, error) {
+func (org *ggml) ggml_new_tensor(t ggmlgo.GGML_TYPE, b []int64, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (Tensor, error) {
 	cur, err := Tensor{idx: len(org._tensors)}, errors.New("ggml is close")
 	if org.is_close {
 		return cur, err
 	}
 	n_dims := C.int(len(b))
-	_tensor := C.ggml_new_tensor(org._gctx, C.enum_ggml_type(t), n_dims, (*C.int64_t)(unsafe.Pointer(&b)))
-	if _tensor == nil {
+	if n_dims < 1 || n_dims > 4 {
+		return cur, errors.New("n_dims >= 1 && n_dims <= GGML_MAX_DIMS")
+	}
+	_tensor1 := C.ggml_new_tensor(org._gctx, C.enum_ggml_type(t), n_dims, (*C.int64_t)(unsafe.Pointer(&b)))
+	if _tensor1 == nil {
 		return cur, errors.New("ggml new _tensor err")
 	}
-	org._tensors = append(org._tensors, _tensor)
-	cur.org, cur.T = org, t
+	org._tensors = append(org._tensors, _tensor1)
+	i := 0
+	for _, v := range list {
+		_tensor1.src[i] = v
+		i++
+	}
+	_tensor1.op = C.enum_ggml_op(op)
+
+	cur.ne[0], cur.ne[1], cur.ne[2], cur.ne[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
+	cur.nb[0], cur.nb[1], cur.nb[2], cur.nb[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
+	cur.t, cur.op, cur.org = ggmlgo.GGML_TYPE(_tensor1._type), op, org
 	return cur, nil
 }
 
-func (org *ggml) ggml_view_tensor(idx int, list ...*C.struct_ggml_tensor) (Tensor, error) {
+func (org *ggml) ggml_view_tensor(idx int, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (Tensor, error) {
 	cur, err := Tensor{idx: len(org._tensors)}, errors.New("ggml is close")
 	if org.is_close {
 		return cur, err
@@ -131,40 +145,21 @@ func (org *ggml) ggml_view_tensor(idx int, list ...*C.struct_ggml_tensor) (Tenso
 	if !(idx < len(org._tensors)) || len(list) > 9 {
 		return cur, errors.New("idx overris")
 	}
-	_tensor := C.ggml_view_tensor(org._gctx, org._tensors[idx])
-	if _tensor == nil {
+	_tensor0 := org._tensors[idx]
+	_tensor1 := C.ggml_view_tensor(org._gctx, _tensor0)
+	if _tensor1 == nil {
 		return cur, errors.New("ggml new _tensor err")
 	}
-	org._tensors = append(org._tensors, _tensor)
-	org._tensors[cur.idx].src[0] = _tensor
+	list = append([]*C.struct_ggml_tensor{_tensor0}, list...)
+	org._tensors = append(org._tensors, _tensor1)
 	i := 0
 	for _, v := range list {
-		org._tensors[cur.idx].src[i] = v
+		_tensor1.src[i] = v
 		i++
 	}
-	cur.org, cur.T, cur.Name = org, ggmlgo.GGML_TYPE(org._tensors[idx]._type), C.GoString(&_tensor.name[0])
-	return cur, nil
-}
-
-func (org *ggml) ggml_dup_tensor(idx int, list ...*C.struct_ggml_tensor) (Tensor, error) {
-	cur, err := Tensor{idx: len(org._tensors)}, errors.New("ggml is close")
-	if org.is_close {
-		return cur, err
-	}
-	if !(idx < len(org._tensors)) || len(list) > 9 {
-		return cur, errors.New("idx overris")
-	}
-	_tensor := C.ggml_dup_tensor(org._gctx, org._tensors[idx])
-	if _tensor == nil {
-		return cur, errors.New("ggml new _tensor err")
-	}
-	org._tensors = append(org._tensors, _tensor)
-	org._tensors[cur.idx].src[0] = _tensor
-	i := 0
-	for _, v := range list {
-		org._tensors[cur.idx].src[i] = v
-		i++
-	}
-	cur.org, cur.T, cur.Name = org, ggmlgo.GGML_TYPE(org._tensors[idx]._type), C.GoString(&_tensor.name[0])
+	_tensor1.op = C.enum_ggml_op(op)
+	cur.ne[0], cur.ne[1], cur.ne[2], cur.ne[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
+	cur.nb[0], cur.nb[1], cur.nb[2], cur.nb[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
+	cur.t, cur.op, cur.org, cur.name, cur.view = ggmlgo.GGML_TYPE(_tensor1._type), op, org, C.GoString(&_tensor1.name[0]), true
 	return cur, nil
 }
