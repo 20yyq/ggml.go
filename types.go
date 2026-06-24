@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-25 14:30:51
-// @ LastEditTime : 2026-05-26 14:51:53
+// @ LastEditTime : 2026-06-22 11:09:40
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -321,4 +321,23 @@ const (
 	GGML_BACKEND_DEVICE_TYPE_ACCEL
 	// "meta" device wrapping multiple other devices for tensor parallelism
 	GGML_BACKEND_DEVICE_TYPE_META
+)
+
+// types that can be stored as GGUF KV data
+type GGUF_TYPE int32
+
+const (
+	GGUF_TYPE_UINT8 GGUF_TYPE = iota
+	GGUF_TYPE_INT8
+	GGUF_TYPE_UINT16
+	GGUF_TYPE_INT16
+	GGUF_TYPE_UINT32
+	GGUF_TYPE_INT32
+	GGUF_TYPE_FLOAT32
+	GGUF_TYPE_BOOL
+	GGUF_TYPE_STRING
+	GGUF_TYPE_ARRAY
+	GGUF_TYPE_UINT64
+	GGUF_TYPE_INT64
+	GGUF_TYPE_FLOAT64
 )

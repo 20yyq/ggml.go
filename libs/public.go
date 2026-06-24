@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 09:42:34
-// @ LastEditTime : 2026-05-28 11:32:52
+// @ LastEditTime : 2026-06-23 17:23:53
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -12,7 +12,6 @@ package libs
 // #include "expand.h"
 import "C"
 import (
-	"context"
 	"errors"
 
 	ggmlgo "ggml.go"
@@ -32,11 +31,6 @@ func numa_init() {
 		panic("CPU backend is not loaded")
 	}
 	C.numa_init_fn(reg, C.GGML_NUMA_STRATEGY_NUMACTL)
-}
-
-func ggml_padding(u1, u2 uint64) uint64 {
-	u2 -= 1
-	return (u1 + u2) & (SIZE_MAX ^ u2)
 }
 
 type InitParams struct {
@@ -63,27 +57,9 @@ func DInit() error {
 	return nil
 }
 
-// file 模型绝对路径
-func NewModel(file string, model *GGML) (GGML_INIT, error) {
-	err := model.org.init(file, true)
-	if err != nil {
-		return nil, err
-	}
-	model.Alignment = uint64(C.gguf_get_alignment(model.org._fctx))
-	model.MetaSize = uint64(C.gguf_get_meta_size(model.org._fctx))
-	model.KV = int64(C.gguf_get_n_kv(model.org._fctx))
-	model.Tensors = int64(C.gguf_get_n_tensors(model.org._fctx))
-	return model.init, err
-}
-
-// file 模型绝对路径
-func NewContext(file string, c *Context, ctx context.Context) error {
-	err := c.org.init(file, false)
-	if err == nil {
-		c.org.ctx, c.org.cancel = context.WithCancelCause(ctx)
-		go c.org.done()
-	}
-	return err
+func LIB_ggml_padding(u1, u2 uint64) uint64 {
+	u2 -= 1
+	return (u1 + u2) & (SIZE_MAX ^ u2)
 }
 
 func LIB_ggml_version() string {
@@ -98,6 +74,11 @@ func LIB_ggml_commit() string {
 func LIB_ggml_tensor_overhead() uint64 {
 	// GGML_API size_t ggml_tensor_overhead(void);
 	return uint64(C.ggml_tensor_overhead())
+}
+
+func LIB_ggml_graph_overhead_custom(n uint64) uint64 {
+	// GGML_API size_t ggml_graph_overhead_custom(size_t size, bool grads);
+	return uint64(C.ggml_graph_overhead_custom(C.size_t(n), false))
 }
 
 func LIB_ggml_backend_dev_count() uint64 {

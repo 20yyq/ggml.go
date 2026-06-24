@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-22 08:21:47
-// @ LastEditTime : 2026-05-28 16:28:35
+// @ LastEditTime : 2026-06-24 09:58:04
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -38,88 +38,74 @@ func init() {
 	C.ggml_set_abort_callback(C.ggml_abort_callback_t(C.go_abort_callback))
 }
 
-type ggml struct {
-	_gctx             *C.struct_ggml_context
-	_fctx             *C.struct_gguf_context
-	_tensors          []*C.struct_ggml_tensor
-	ctx               context.Context
-	cancel            context.CancelCauseFunc
-	is_init, is_close bool
+type GGML struct {
+	_gctx                       *C.struct_ggml_context
+	_cgraph                     *C.struct_ggml_cgraph
+	_tensors                    []*C.struct_ggml_tensor
+	data                        []byte
+	ctx                         context.Context
+	cancel                      context.CancelCauseFunc
+	is_init, is_close, is_graph bool
 }
 
-func (gl *GGML) init(m Model) error {
-	err := errors.New("is close or is init")
-	if gl.org.is_init || gl.org.is_close {
-		return err
-	}
-	if err = errors.New("not gguf"); gl.org._fctx == nil {
-		return err
-	}
-	if err = errors.New("not ggml"); gl.org._gctx == nil {
-		return err
-	}
-	gl.org.is_init = true
-	m.Loader(gl.org)
-	m.Devices(gl.org)
-	m.LoadHparams(gl.org)
-	m.LoadVocab(gl.org)
-	m.LoadStatus(gl.org)
-	m.LoadTensors(gl.org)
-	gl.org.close()
-	return nil
-}
-
-func (org *ggml) init(file string, no_alloc bool) error {
-	if org.is_close || org._fctx != nil || org._gctx != nil {
+func (org *GGML) init(n_tensors uint64, is_graph bool) error {
+	if org.is_init {
 		return errors.New("is close or is init")
 	}
-	name, params := C.CString(file), C.struct_gguf_init_params{no_alloc: C._Bool(no_alloc), ctx: &org._gctx}
-	defer C.free(unsafe.Pointer(name))
-	org._fctx = C.gguf_init_from_file(name, params)
-	if org._fctx == nil {
-		C.gguf_free(org._fctx)
-		org._fctx = nil
-		return errors.New("failed to load model from gguf")
+	gn := LIB_ggml_padding(uint64(unsafe.Sizeof(C._c_ggml_context_t{})), 16)
+	n := gn + n_tensors*LIB_ggml_tensor_overhead()
+	if org.is_graph = is_graph; is_graph {
+		n += LIB_ggml_graph_overhead_custom(n_tensors)
 	}
-	if org._gctx == nil {
-		C.ggml_free(org._gctx)
-		org._gctx = nil
-		return errors.New("failed to load model from ggml")
+	n = LIB_ggml_padding(n, 16)
+	org.data = make([]byte, n)
+	if org.data == nil {
+		return errors.New("overflow byte")
 	}
-	tensor := C.ggml_get_first_tensor(org._gctx)
-	for tensor != nil {
-		org._tensors = append(org._tensors, tensor)
-		tensor = C.ggml_get_next_tensor(org._gctx, tensor)
+	org.is_init = true
+	ptr := unsafe.Pointer(unsafe.SliceData(org.data))
+	org._gctx = (*C.struct_ggml_context)(ptr)
+	*(*uint64)(ptr) = n - gn
+	ptr = unsafe.Pointer(uintptr(ptr) + unsafe.Sizeof(n))
+	*(*unsafe.Pointer)(ptr) = unsafe.Pointer(unsafe.SliceData(org.data[gn:]))
+	ptr = unsafe.Pointer(uintptr(ptr) + unsafe.Sizeof(ptr))
+	*(*bool)(ptr) = false
+	ptr = unsafe.Pointer(uintptr(ptr) + unsafe.Sizeof(false))
+	*(*bool)(ptr) = true
+	if is_graph {
+		org._cgraph = C.ggml_new_graph_custom(org._gctx, C.size_t(n_tensors), false)
 	}
 	return nil
 }
 
-func (org *ggml) done() {
+func (org *GGML) done() {
 	<-org.ctx.Done()
 	org.close()
 }
 
-func (org *ggml) close() error {
+func (org *GGML) close() error {
 	err := errors.New("is close")
+	// C.ggml_print_objects(org._gctx)
 	if !org.is_close {
 		org.is_close, err = true, nil
-		C.gguf_free(org._fctx)
-		C.ggml_free(org._gctx)
-		org._fctx, org._gctx = nil, nil
+		org._cgraph, org._gctx = nil, nil
 	}
 	return err
 }
 
-func (org *ggml) ggml_new_tensor(t ggmlgo.GGML_TYPE, b []int64, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (Tensor, error) {
-	cur, err := Tensor{idx: len(org._tensors)}, errors.New("ggml is close")
+func (org *GGML) ggml_new_tensor(t ggmlgo.GGML_TYPE, b []int64, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (TensorInfo, error) {
+	cur, err := TensorInfo{idx: len(org._tensors)}, errors.New("ggml is close")
 	if org.is_close {
 		return cur, err
+	}
+	if len(list) > 10 {
+		return cur, errors.New("idx overris")
 	}
 	n_dims := C.int(len(b))
 	if n_dims < 1 || n_dims > 4 {
 		return cur, errors.New("n_dims >= 1 && n_dims <= GGML_MAX_DIMS")
 	}
-	_tensor1 := C.ggml_new_tensor(org._gctx, C.enum_ggml_type(t), n_dims, (*C.int64_t)(unsafe.Pointer(&b)))
+	_tensor1 := C.ggml_new_tensor(org._gctx, C.enum_ggml_type(t), n_dims, (*C.int64_t)(unsafe.SliceData(b)))
 	if _tensor1 == nil {
 		return cur, errors.New("ggml new _tensor err")
 	}
@@ -131,14 +117,14 @@ func (org *ggml) ggml_new_tensor(t ggmlgo.GGML_TYPE, b []int64, op ggmlgo.GGML_O
 	}
 	_tensor1.op = C.enum_ggml_op(op)
 
-	cur.ne[0], cur.ne[1], cur.ne[2], cur.ne[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
-	cur.nb[0], cur.nb[1], cur.nb[2], cur.nb[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
-	cur.t, cur.op, cur.org = ggmlgo.GGML_TYPE(_tensor1._type), op, org
+	cur.NE[0], cur.NE[1], cur.NE[2], cur.NE[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
+	cur.NB[0], cur.NB[1], cur.NB[2], cur.NB[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
+	cur.T, cur.OP = ggmlgo.GGML_TYPE(_tensor1._type), op
 	return cur, nil
 }
 
-func (org *ggml) ggml_view_tensor(idx int, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (Tensor, error) {
-	cur, err := Tensor{idx: len(org._tensors)}, errors.New("ggml is close")
+func (org *GGML) ggml_view_tensor(idx int, op ggmlgo.GGML_OP, list ...*C.struct_ggml_tensor) (TensorInfo, error) {
+	cur, err := TensorInfo{idx: len(org._tensors)}, errors.New("ggml is close")
 	if org.is_close {
 		return cur, err
 	}
@@ -158,8 +144,8 @@ func (org *ggml) ggml_view_tensor(idx int, op ggmlgo.GGML_OP, list ...*C.struct_
 		i++
 	}
 	_tensor1.op = C.enum_ggml_op(op)
-	cur.ne[0], cur.ne[1], cur.ne[2], cur.ne[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
-	cur.nb[0], cur.nb[1], cur.nb[2], cur.nb[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
-	cur.t, cur.op, cur.org, cur.name, cur.view = ggmlgo.GGML_TYPE(_tensor1._type), op, org, C.GoString(&_tensor1.name[0]), true
+	cur.NE[0], cur.NE[1], cur.NE[2], cur.NE[3] = int64(_tensor1.ne[0]), int64(_tensor1.ne[1]), int64(_tensor1.ne[2]), int64(_tensor1.ne[3])
+	cur.NB[0], cur.NB[1], cur.NB[2], cur.NB[3] = uint64(_tensor1.nb[0]), uint64(_tensor1.nb[1]), uint64(_tensor1.nb[2]), uint64(_tensor1.nb[3])
+	cur.T, cur.OP, cur.Name, cur.view = ggmlgo.GGML_TYPE(_tensor1._type), op, C.GoString(&_tensor1.name[0]), true
 	return cur, nil
 }
