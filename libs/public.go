@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 09:42:34
-// @ LastEditTime : 2026-06-23 17:23:53
+// @ LastEditTime : 2026-06-29 14:56:16
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -21,18 +21,6 @@ const SIZE_MAX uint64 = 0xFFFFFFFFFFFFFFFF
 
 var is_init bool
 
-func numa_init() {
-	dev := C.ggml_backend_dev_by_type(C.GGML_BACKEND_DEVICE_TYPE_CPU)
-	if dev != nil {
-		panic("CPU backend is not loaded")
-	}
-	reg := C.ggml_backend_dev_backend_reg(dev)
-	if reg != nil {
-		panic("CPU backend is not loaded")
-	}
-	C.numa_init_fn(reg, C.GGML_NUMA_STRATEGY_NUMACTL)
-}
-
 type InitParams struct {
 	Numa bool
 }
@@ -41,10 +29,7 @@ func Init(p InitParams) error {
 	if is_init {
 		return errors.New("is init")
 	}
-	backend_init()
-	if p.Numa {
-		numa_init()
-	}
+	backend_init(p.Numa)
 	is_init = true
 	return nil
 }
@@ -79,16 +64,6 @@ func LIB_ggml_tensor_overhead() uint64 {
 func LIB_ggml_graph_overhead_custom(n uint64) uint64 {
 	// GGML_API size_t ggml_graph_overhead_custom(size_t size, bool grads);
 	return uint64(C.ggml_graph_overhead_custom(C.size_t(n), false))
-}
-
-func LIB_ggml_backend_dev_count() uint64 {
-	// GGML_API size_t             ggml_backend_dev_count(void);
-	return uint64(C.ggml_backend_dev_count())
-}
-
-func LIB_ggml_backend_reg_count() uint64 {
-	// GGML_API size_t             ggml_backend_reg_count(void);
-	return uint64(C.ggml_backend_reg_count())
 }
 
 func LIB_ggml_blck_size(t ggmlgo.GGML_TYPE) int64 {
@@ -140,4 +115,24 @@ func LIB_ggml_unary_op_name(t ggmlgo.GGML_UNARY_OP) string {
 func LIB_ggml_glu_op_name(t ggmlgo.GGML_GLU_OP) string {
 	// GGML_API const char * ggml_glu_op_name(enum ggml_glu_op op);
 	return C.GoString(C.ggml_glu_op_name(C.enum_ggml_glu_op(t)))
+}
+
+// ------------------------------------backend
+
+func LIB_dev_count() uint64 {
+	// GGML_API size_t             ggml_backend_dev_count(void);
+	return uint64(C.ggml_backend_dev_count())
+}
+
+func LIB_reg_count() uint64 {
+	// GGML_API size_t             ggml_backend_reg_count(void);
+	return uint64(C.ggml_backend_reg_count())
+}
+
+func GetDevs() []Dev {
+	var l []Dev
+	for k, v := range devs {
+		l = append(l, Dev{org: v, idx: uint8(k), info: v.info()})
+	}
+	return l
 }

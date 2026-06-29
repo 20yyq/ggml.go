@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-25 11:35:55
-// @ LastEditTime : 2026-06-24 13:36:24
+// @ LastEditTime : 2026-06-29 14:13:38
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -9,7 +9,7 @@
 // @@
 package libs
 
-// #include "ggml.h"
+// #include "expand.h"
 import "C"
 import (
 	"errors"
@@ -27,6 +27,16 @@ type TensorInfo struct {
 	T      ggmlgo.GGML_TYPE
 	OP     ggmlgo.GGML_OP // compute data
 	Offset uint64
+}
+
+func (obj *TensorInfo) from_ggml_tensor(tensor *C.struct_ggml_tensor) {
+	var ne []int64
+	ne = unsafe.Slice((*int64)(unsafe.Pointer(&tensor.ne[0])), 4)
+	copy(obj.NE[:], ne)
+	var nb []uint64
+	nb = unsafe.Slice((*uint64)(unsafe.Pointer(&tensor.nb[0])), 4)
+	copy(obj.NB[:], nb)
+	obj.T, obj.OP, obj.Name = ggmlgo.GGML_TYPE(tensor._type), ggmlgo.GGML_OP(tensor.op), C.GoString(&tensor.name[0])
 }
 
 func (obj TensorInfo) ggml_nelements() int64 {
@@ -248,6 +258,14 @@ func (obj TensorInfo) P_is_view() bool {
 	return obj.view
 }
 
+func (obj TensorInfo) P_can_mul_mat(obj1 TensorInfo) bool {
+	// static inline bool ggml_can_mul_mat(const struct ggml_tensor * t0, const struct ggml_tensor * t1)
+	// return (t0->ne[0]           == t1->ne[0])  &&
+	//        (t1->ne[2]%t0->ne[2] == 0)          && // verify t0 is broadcastable
+	//        (t1->ne[3]%t0->ne[3] == 0);
+	return obj.NE[0] == obj1.NE[0] && (obj1.NE[2]%obj.NE[2] == 0) && (obj1.NE[3]%obj.NE[3] == 0)
+}
+
 // -------------------------
 
 type Tensor struct {
@@ -294,6 +312,31 @@ func (obj *Tensor) check_ggml() (*C.struct_ggml_tensor, error) {
 
 func (obj Tensor) Info() TensorInfo {
 	return obj.info
+}
+
+func (obj Tensor) SetData(data []byte) error {
+	tensor, err := obj.check_ggml()
+	if err != nil {
+		return err
+	}
+	l := uint64(len(data))
+	if l < 1 || l != obj.info.ggml_nbytes() {
+		return errors.New("l < 1 || l != obj.info.ggml_nbytes()")
+	}
+	C.ggml_backend_tensor_set(tensor, unsafe.Pointer(unsafe.SliceData(data)), 0, C.size_t(l))
+	return nil
+}
+
+func (obj Tensor) ForwardExpand() error {
+	tensor, err := obj.check_ggml()
+	if err != nil {
+		return err
+	}
+	if obj.org._cgraph == nil {
+		return errors.New("obj.org._cgraph == nil")
+	}
+	C.ggml_build_forward_expand(obj.org._cgraph, tensor)
+	return nil
 }
 
 func (obj Tensor) Dup(view bool) (Tensor, error) {
@@ -773,6 +816,33 @@ func (obj Tensor) REPEAT_BACK(src Tensor) (Tensor, error) {
 	_tensor0, b := obj.org._tensors[obj.info.idx], src.info.NE[:]
 	obj1, err := Tensor{org: obj.org}, error(nil)
 	obj1.info, err = obj.org.ggml_new_tensor(obj.info.T, b, ggmlgo.GGML_OP_REPEAT_BACK, _tensor0)
+	if err != nil {
+		return Tensor{}, err
+	}
+	return obj1, nil
+}
+
+func (obj Tensor) MUL_MAT(src Tensor) (Tensor, error) {
+	if obj.org != src.org {
+		return Tensor{}, errors.New("obj.org != src.org")
+	}
+	if obj.info.P_is_transposed() {
+		return Tensor{}, errors.New("!obj.P_is_transposed()")
+	}
+	if !obj.info.P_can_mul_mat(src.info) {
+		return Tensor{}, errors.New("!obj.P_can_mul_mat()")
+	}
+
+	if _, err := obj.check_ggml(); err != nil {
+		return Tensor{}, err
+	}
+	if _, err := src.check_ggml(); err != nil {
+		return Tensor{}, err
+	}
+	_tensor0, _tensor1 := obj.org._tensors[obj.info.idx], obj.org._tensors[src.info.idx]
+	b := []int64{obj.info.NE[1], src.info.NE[1], src.info.NE[2], src.info.NE[3]}
+	obj1, err := Tensor{org: obj.org}, error(nil)
+	obj1.info, err = obj.org.ggml_new_tensor(ggmlgo.GGML_TYPE_F32, b, ggmlgo.GGML_OP_MUL_MAT, _tensor0, _tensor1)
 	if err != nil {
 		return Tensor{}, err
 	}
