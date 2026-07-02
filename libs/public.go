@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 09:42:34
-// @ LastEditTime : 2026-06-29 14:56:16
+// @ LastEditTime : 2026-06-30 10:42:42
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -13,32 +13,30 @@ package libs
 import "C"
 import (
 	"errors"
+	"sync/atomic"
 
 	ggmlgo "ggml.go"
 )
 
-const SIZE_MAX uint64 = 0xFFFFFFFFFFFFFFFF
-
-var is_init bool
+var is_init atomic.Bool
 
 type InitParams struct {
 	Numa bool
 }
 
 func Init(p InitParams) error {
-	if is_init {
+	if is_init.Swap(true) {
 		return errors.New("is init")
 	}
 	backend_init(p.Numa)
-	is_init = true
 	return nil
 }
 
 func DInit() error {
-	if is_init {
-		backend_dinit()
-		is_init = false
+	if !is_init.Swap(false) {
+		return errors.New("is dinit")
 	}
+	backend_dinit()
 	return nil
 }
 
@@ -132,7 +130,7 @@ func LIB_reg_count() uint64 {
 func GetDevs() []Dev {
 	var l []Dev
 	for k, v := range devs {
-		l = append(l, Dev{org: v, idx: uint8(k), info: v.info()})
+		l = append(l, Dev{org: v, idx: uint8(k), Info: v.info()})
 	}
 	return l
 }

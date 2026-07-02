@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-06-22 10:51:45
-// @ LastEditTime : 2026-06-24 15:00:26
+// @ LastEditTime : 2026-06-30 14:28:29
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -12,6 +12,7 @@ package src
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,9 +29,30 @@ const SIZE_MAX uint64 = 0xFFFFFFFFFFFFFFFF
 const GGUF_MAX_STRING_LENGTH uint64 = 1024 * 1024 * 1024
 const GGUF_MAX_ARRAY_ELEMENTS uint64 = 1024 * 1024 * 1024
 
+type gguf_kv[T value_t | string] struct {
+	tp   ggmlgo.GGUF_TYPE
+	list []T
+}
+
+func (p *gguf_kv[T]) Println() {
+	fmt.Println("---------", p.list[0])
+}
+
+func (p *gguf_kv[T]) GetType() ggmlgo.GGUF_TYPE {
+	return p.tp
+}
+
 type GGUF_KV interface {
 	Println()
 	GetType() ggmlgo.GGUF_TYPE
+}
+
+func GetList[T value_t | string](obj GGUF_KV) []T {
+	ptr, ok := obj.(*gguf_kv[T])
+	if !ok {
+		return nil
+	}
+	return ptr.list
 }
 
 type GGUF struct {
@@ -39,13 +61,14 @@ type GGUF struct {
 	version                 uint32
 	ctx_alignment, ctx_size uint64
 	n_kv, n_tensors         int64
-	kvMaps                  map[string]GGUF_KV
-	tensorMaps              map[string]*libs.Tensor
 	ctx                     context.Context
 	cancel                  context.CancelCauseFunc
 }
 
-func (ptr *GGUF) Init(file string, ctx context.Context) error {
+func (ptr *GGUF) Init(file string, kvMaps *map[string]GGUF_KV, tensorMaps *map[string]*libs.Tensor, ctx context.Context) error {
+	if kvMaps == nil || tensorMaps == nil {
+		return errors.New("map ptr == nil")
+	}
 	f, err := os.Open(file)
 	if err != nil {
 		return err
@@ -79,14 +102,14 @@ func (ptr *GGUF) Init(file string, ctx context.Context) error {
 	}
 	go ptr.done()
 
-	ptr.kvMaps, ptr.tensorMaps, ptr.ctx_alignment, ptr.file = map[string]GGUF_KV{}, map[string]*libs.Tensor{}, 32, file
+	ptr.ctx_alignment, ptr.file = 32, file
 
-	if !ptr.kvPairs(f, ptr.n_kv) {
+	if !ptr.kvPairs(f, ptr.n_kv, kvMaps) {
 		ptr.cancel(io.EOF)
 		return err
 	}
 
-	if !ptr.tensorPairs(f, ptr.n_tensors) {
+	if !ptr.tensorPairs(f, ptr.n_tensors, tensorMaps) {
 		ptr.cancel(io.EOF)
 		return err
 	}
@@ -122,33 +145,21 @@ func (ptr *GGUF) magicAndVersion(r io.Reader) bool {
 	return ok
 }
 
-type gguf_kv[T bool | string | int8 | int16 | int32 | int64 | uint8 | uint16 | uint32 | uint64 | float32 | float64] struct {
-	tp   ggmlgo.GGUF_TYPE
-	list []T
-}
-
-func (p *gguf_kv[T]) Println() {
-	fmt.Println("---------", p.list[0])
-}
-
-func (p *gguf_kv[T]) GetType() ggmlgo.GGUF_TYPE {
-	return p.tp
-}
-
-func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
+func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64, kvMaps *map[string]GGUF_KV) bool {
 	res := true
+	*kvMaps = map[string]GGUF_KV{}
 	for i := int64(0); res && i < n_kv; i++ {
 		ok, key, t, n := true, "", int32(-1), uint64(1)
 		if ok = readString(r, &key); !ok {
 			res = false
 			break
 		}
-		if _, ok = ptr.kvMaps[key]; ok {
+		if _, ok = (*kvMaps)[key]; ok {
 			fmt.Println("duplicate key ", key)
 			res = false
 			break
 		}
-		ptr.kvMaps[key] = nil
+		(*kvMaps)[key] = nil
 		if ok = binaryRead(r, &t); !ok {
 			res = false
 			break
@@ -175,7 +186,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[int8]{tp: ggmlgo.GGUF_TYPE(t), list: make([]int8, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				return false
 			}
@@ -185,7 +196,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[uint8]{tp: ggmlgo.GGUF_TYPE(t), list: make([]uint8, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -196,7 +207,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[int16]{tp: ggmlgo.GGUF_TYPE(t), list: make([]int16, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -207,7 +218,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[uint16]{tp: ggmlgo.GGUF_TYPE(t), list: make([]uint16, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -218,7 +229,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[int32]{tp: ggmlgo.GGUF_TYPE(t), list: make([]int32, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -229,7 +240,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[uint32]{tp: ggmlgo.GGUF_TYPE(t), list: make([]uint32, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -243,7 +254,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[int64]{tp: ggmlgo.GGUF_TYPE(t), list: make([]int64, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -254,7 +265,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[uint64]{tp: ggmlgo.GGUF_TYPE(t), list: make([]uint64, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -265,7 +276,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[bool]{tp: ggmlgo.GGUF_TYPE(t), list: make([]bool, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -276,7 +287,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[float32]{tp: ggmlgo.GGUF_TYPE(t), list: make([]float32, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
@@ -287,14 +298,14 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 				break
 			}
 			value := &gguf_kv[float64]{tp: ggmlgo.GGUF_TYPE(t), list: make([]float64, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			if ok = binaryReadSlice(r, value.list); !ok {
 				res = false
 				break
 			}
 		case ggmlgo.GGUF_TYPE_STRING:
 			value := &gguf_kv[string]{tp: ggmlgo.GGUF_TYPE(t), list: make([]string, n)}
-			ptr.kvMaps[key] = value
+			(*kvMaps)[key] = value
 			for i := uint64(0); i < n; i++ {
 				if ok = readString(r, &value.list[i]); !ok {
 					res = false
@@ -309,7 +320,7 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 			break
 		}
 	}
-	if int(n_kv) != len(ptr.kvMaps) {
+	if int(n_kv) != len((*kvMaps)) {
 		fmt.Println("failed to read key-value pairs int(n_kv) != len(kvMaps)")
 		res = false
 	}
@@ -322,17 +333,18 @@ func (ptr *GGUF) kvPairs(r io.Reader, n_kv int64) bool {
 	return res
 }
 
-func (ptr *GGUF) tensorPairs(r io.Reader, n_tensors int64) bool {
+func (ptr *GGUF) tensorPairs(r io.Reader, n_tensors int64, tensorMaps *map[string]*libs.Tensor) bool {
+	*tensorMaps = map[string]*libs.Tensor{}
 	for i := int64(0); i < n_tensors; i++ {
 		ok, obj, n_dims, org := true, &libs.TensorInfo{NE: [4]int64{1, 1, 1, 1}}, uint32(0), &libs.Tensor{}
 		if ok = readString(r, &obj.Name); !ok {
 			return false
 		}
-		if _, ok = ptr.tensorMaps[obj.Name]; ok {
+		if _, ok = (*tensorMaps)[obj.Name]; ok {
 			fmt.Println("duplicate name ", obj.Name)
 			return false
 		}
-		ptr.tensorMaps[obj.Name] = org
+		(*tensorMaps)[obj.Name] = org
 		// tensor shape
 		{
 			if ok = binaryRead(r, &n_dims); !ok {
@@ -386,7 +398,7 @@ func (ptr *GGUF) tensorPairs(r io.Reader, n_tensors int64) bool {
 
 		if err := org.Init(&ptr.org, int(i), obj); err != nil {
 			fmt.Println(obj.Name, ": tensor init err", err)
-			delete(ptr.tensorMaps, obj.Name)
+			delete((*tensorMaps), obj.Name)
 			return false
 		}
 

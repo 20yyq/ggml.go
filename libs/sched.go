@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-06-27 15:24:40
-// @ LastEditTime : 2026-06-29 15:30:50
+// @ LastEditTime : 2026-06-30 10:29:12
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -64,9 +64,9 @@ func (ptr *Sched) AllocGraph(c *GGML) error {
 	return alloc_graph(ptr, c._cgraph)
 }
 
-func (ptr *Sched) GraphCompute(c *GGML) ([]byte, error) {
+func (ptr *Sched) GraphCompute(c *GGML) (ResultTensor, error) {
 	if ptr.ctx == nil {
-		return nil, nil
+		return ResultTensor{}, nil
 	}
 	return graph_compute(ptr, c._cgraph)
 }
@@ -129,15 +129,17 @@ func sched(p *Sched, bs []*Backend, n_tensors uint64) error {
 	var l []C.ggml_backend_t
 	var l1 []C.ggml_backend_buffer_type_t
 	for _, v := range bs {
-		if bptr := v.Dev.org.get_backend(v); bptr != nil {
-			l = append(l, bptr)
-			buf := C.ggml_backend_get_default_buffer_type(bptr)
-			if v.Dev.info.T == ggmlgo.GGML_BACKEND_DEVICE_TYPE_CPU {
-				if tmp := C.ggml_backend_dev_host_buffer_type(v.Dev.org.ptr); tmp != nil {
-					buf = tmp
+		if v.Check() == nil {
+			if bptr := v.Dev.org.get_backend(v); bptr != nil {
+				l = append(l, bptr)
+				buf := C.ggml_backend_get_default_buffer_type(bptr)
+				if info := v.Dev.org.info(); info.T == ggmlgo.GGML_BACKEND_DEVICE_TYPE_CPU {
+					if tmp := C.ggml_backend_dev_host_buffer_type(v.Dev.org.ptr); tmp != nil {
+						buf = tmp
+					}
 				}
+				l1 = append(l1, buf)
 			}
-			l1 = append(l1, buf)
 		}
 	}
 	if len(l) != len(l1) {
@@ -202,7 +204,7 @@ func alloc_graph(p *Sched, cgraph *C.struct_ggml_cgraph) error {
 	return err
 }
 
-func graph_compute(p *Sched, cgraph *C.struct_ggml_cgraph) ([]byte, error) {
+func graph_compute(p *Sched, cgraph *C.struct_ggml_cgraph) (ResultTensor, error) {
 	err := errors.New("is close or is init")
 	obj := &sched_t{}
 	scheds.maps.Range(func(key, value any) bool {
@@ -215,7 +217,7 @@ func graph_compute(p *Sched, cgraph *C.struct_ggml_cgraph) ([]byte, error) {
 	})
 	if obj.lock == nil {
 		err = errors.New("is close or is init")
-		return nil, err
+		return ResultTensor{}, err
 	}
 	obj.lock.Lock()
 	if !*obj.delete {
@@ -223,11 +225,11 @@ func graph_compute(p *Sched, cgraph *C.struct_ggml_cgraph) ([]byte, error) {
 	}
 	obj.lock.Unlock()
 	res := C.ggml_graph_node(cgraph, -1)
-	var info TensorInfo
-	info.from_ggml_tensor(res)
-	b := make([]byte, info.ggml_nbytes())
-	C.ggml_backend_tensor_get(res, unsafe.Pointer(unsafe.SliceData(b)), 0, C.size_t(len(b)))
-	return b, err
+	var info ResultTensor
+	info.Info.from_ggml_tensor(res)
+	info.Data = make([]byte, info.Info.ggml_nbytes())
+	C.ggml_backend_tensor_get(res, unsafe.Pointer(unsafe.SliceData(info.Data)), 0, C.size_t(len(info.Data)))
+	return info, err
 }
 
 func delete_sched(p *Sched) {

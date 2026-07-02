@@ -1,7 +1,7 @@
 // @@
 // @ Author       : Eacher
 // @ Date         : 2026-05-23 22:16:49
-// @ LastEditTime : 2026-06-29 15:00:21
+// @ LastEditTime : 2026-06-30 10:18:47
 // @ LastEditors  : Eacher
 // @ --------------------------------------------------------------------------------<
 // @ Description  : Please edit a descrition about this file at here.
@@ -12,7 +12,6 @@ package libs
 // #include "expand.h"
 import "C"
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,13 +20,6 @@ import (
 
 	ggmlgo "ggml.go"
 )
-
-type DevInfo struct {
-	T                        ggmlgo.GGML_BACKEND_DEV_TYPE
-	IsNuma                   bool
-	DevName, DevDes, RegName string
-	MemoryFree, MemoryTotal  uint64 // device free memory in bytes device total memory in bytes
-}
 
 type dev struct {
 	ptr     C.ggml_backend_dev_t
@@ -110,6 +102,22 @@ func (ptr *dev) get_backend(p *Backend) C.ggml_backend_t {
 	})
 	return bptr
 }
+
+func (ptr *dev) set_n_threads(p *Backend, n uint16) error {
+	var bptr C.ggml_backend_t = nil
+	ptr.childes.Range(func(key, value any) bool {
+		if key.(*Backend) == p {
+			bptr = value.(C.ggml_backend_t)
+			return false
+		}
+		return true
+	})
+	if bptr != nil {
+		C.set_n_threads(ptr.reg, bptr, C.int(n))
+	}
+	return nil
+}
+
 func (ptr *dev) info() DevInfo {
 	var info DevInfo
 	info.T, info.IsNuma = ggmlgo.GGML_BACKEND_DEV_TYPE(ptr.props._type), ptr.is_numa
@@ -117,80 +125,4 @@ func (ptr *dev) info() DevInfo {
 	info.RegName = C.GoString(C.ggml_backend_reg_name(ptr.reg))
 	info.MemoryFree, info.MemoryTotal = uint64(ptr.props.memory_free), uint64(ptr.props.memory_total)
 	return info
-}
-
-type Dev struct {
-	org  *dev
-	idx  uint8
-	info DevInfo
-}
-
-func (ptr *Dev) Info() DevInfo {
-	return ptr.info
-}
-
-func (ptr *Dev) Set_n_threads(n uint16) error {
-
-	return nil
-}
-
-type Backend struct {
-	ctx               context.Context
-	cancel            context.CancelCauseFunc
-	is_init, is_close bool
-
-	Dev Dev
-}
-
-func (ptr *Backend) Init(ctx context.Context) error {
-	err := ptr.init()
-	if err == nil {
-		ptr.ctx, ptr.cancel = context.WithCancelCause(ctx)
-		go ptr.done()
-	}
-	return err
-}
-
-func (ptr *Backend) Done() <-chan struct{} {
-	if ptr.ctx == nil {
-		return nil
-	}
-	return ptr.ctx.Done()
-}
-
-func (ptr *Backend) Close() error {
-	if ptr.is_close {
-		return errors.New("is close or is init")
-	}
-	if ptr.cancel != nil {
-		ptr.cancel(io.EOF)
-	}
-	return nil
-}
-
-func (org *Backend) init() error {
-	err := errors.New("is close or is init")
-	if org.Dev.org == nil || org.is_init || org.is_close {
-		return err
-	}
-
-	if err = org.Dev.org.backend(org); err != nil {
-		return err
-	}
-	org.is_init = true
-	return nil
-}
-
-func (org *Backend) done() {
-	<-org.ctx.Done()
-	org.close()
-}
-
-func (org *Backend) close() error {
-	err := errors.New("is close")
-	if !org.is_close {
-		org.Dev.org.delete_backend(org)
-		org.is_close, err = true, nil
-	}
-	return err
 }
